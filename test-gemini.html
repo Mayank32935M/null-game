@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NULL — Gemini Engine Test</title>
+  <style>
+    body { font-family: monospace; background: #080808; color: #ccc; padding: 24px; font-size: 13px; white-space: pre-wrap; }
+    #log { line-height: 1.8; }
+    .ok   { color: #3ddc84; }
+    .warn { color: #D4A017; }
+    .err  { color: #C41E3A; }
+    .head { color: #E8E8E8; font-weight: bold; border-bottom: 1px solid #333; padding-bottom: 4px; margin: 16px 0 8px; }
+  </style>
+</head>
+<body>
+<div id="log">Running Gemini Engine smoke test…
+</div>
+<script type="module">
+import {
+  callGemini,
+  worldReactionPrompt,
+  validateWorldReaction,
+} from './engine/geminiEngine.js';
+
+const log = document.getElementById('log');
+function print(msg, cls = '') {
+  const el = document.createElement('span');
+  if (cls) el.className = cls;
+  el.textContent = msg + '\n';
+  log.appendChild(el);
+}
+function head(msg) { print('\n' + msg + '\n' + '─'.repeat(60), 'head'); }
+function ok(msg)   { print('✓ ' + msg, 'ok'); }
+function warn(msg) { print('⚠ ' + msg, 'warn'); }
+function err(msg)  { print('✗ ' + msg, 'err'); }
+
+const fakeState = {
+  version: '1.0', region: 'india', playerName: 'Aryan Mathur',
+  currentAct: 1, currentBeat: 2, runNumber: 1,
+  crimeRate: 87.3, publicFearIndex: 5, egoIndex: 2,
+  exposureRisk: 0, lifespanDays: 9847,
+  agencySuspicion: { CBI: 0, RAW: 0, IB: 0 },
+  agencyStatus: { CBI: 'UNAWARE', RAW: 'UNAWARE', IB: 'UNAWARE' },
+  agencyDarkMode: false, eyesDealActive: false,
+  totalKills: 0,
+  killMethods: { heartAttack: 0, accident: 0, publicDeath: 0, manipulated: 0 },
+  companionAlliance: null, phantomBroadcastTriggered: false,
+  newsFeed: [], compoundMemoryEnabled: false,
+};
+
+const fakeKill = {
+  targetName: 'Rajesh Gupta',
+  targetType: 'corrupt local official',
+  method: 'heartAttack',
+  finalActions: null,
+};
+
+head('1 — worldReactionPrompt()');
+try {
+  const prompt = worldReactionPrompt(fakeState, fakeKill);
+  ok('Prompt generated. Length: ' + prompt.length + ' chars');
+  print('First 200 chars: ' + prompt.slice(0, 200) + '…');
+} catch (e) {
+  err('worldReactionPrompt failed: ' + e.message);
+}
+
+head('2 — callGemini() — live API call (may take 5-10s)…');
+print('Calling Gemini 1.5 Flash…');
+let raw;
+try {
+  const prompt = worldReactionPrompt(fakeState, fakeKill);
+  raw = await callGemini(prompt);
+  ok('callGemini returned successfully');
+  print(JSON.stringify(raw, null, 2));
+} catch (e) {
+  err('callGemini failed: ' + e.message);
+}
+
+head('3 — validateWorldReaction()');
+if (raw) {
+  const v = validateWorldReaction(raw, fakeState);
+  if (v.valid) {
+    ok('Validation PASSED — all fields present and in range');
+  } else {
+    warn('Validation returned errors:');
+    v.errors.forEach(e => warn('  · ' + e));
+  }
+  ok('crimeRateDelta   = ' + raw.crimeRateDelta);
+  ok('agencySuspicion  = ' + JSON.stringify(raw.agencySuspicionDelta));
+  ok('publicFearDelta  = ' + raw.publicFearDelta);
+  ok('egoDelta         = ' + raw.egoDelta);
+  ok('exposureRiskDelta= ' + raw.exposureRiskDelta);
+  ok('newsHeadline     = ' + raw.newsHeadline);
+  ok('voidLine         = ' + raw.voidLine);
+  ok('agencyPublicMove = ' + raw.agencyPublicMove);
+} else {
+  warn('Skipping validateWorldReaction — no raw result');
+}
+
+head('Done');
+</script>
+</body>
+</html>

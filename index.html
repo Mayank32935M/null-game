@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description"
+    content="NULL — A browser-based psychological thriller. Discover the notebook that kills. Reduce global crime. Evade the world's intelligence agencies.">
+  <title>NULL — A Notebook Thriller</title>
+
+  <!-- Preconnect for Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="style/main.css">
+  <link rel="stylesheet" href="style/dashboard.css">
+  <link rel="stylesheet" href="style/notebook.css">
+  <link rel="stylesheet" href="style/intel.css">
+
+  <!-- Inline SVG favicon — N in crimson on near-black -->
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='3' fill='%23080808'/><text x='50%25' y='56%25' dominant-baseline='middle' text-anchor='middle' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23C41E3A'>N</text></svg>">
+</head>
+
+<body>
+
+  <!-- ===================================================================
+       Eyes Deal Timer — persistent, only visible when active
+       =================================================================== -->
+  <div id="eyes-timer" class="eyes-timer" aria-live="assertive" aria-label="Eyes Deal countdown"></div>
+
+  <!-- ===================================================================
+       SCREEN 1 — THE DASHBOARD
+       GDD Section 5.2
+       =================================================================== -->
+  <main id="dashboard-screen" class="dashboard screen" aria-label="Dashboard">
+
+    <!-- Top Bar -->
+    <header class="dashboard__topbar">
+      <h1 class="dashboard__title">
+        NULL
+        <span class="dashboard__run-tag">RUN 01</span>
+      </h1>
+      <button id="void-btn" class="dashboard__void-btn" aria-label="Consult Void">
+        <span class="dashboard__void-indicator" aria-hidden="true"></span>
+        VOID
+        <span aria-hidden="true" style="opacity:0.5; font-size:0.6em;">▾</span>
+      </button>
+    </header>
+
+    <!-- Stat Cards Row -->
+    <section class="dashboard__stats" aria-label="World state indicators">
+      <!-- Crime Rate -->
+      <div id="stat-crime" class="stat-card stat-card--crime">
+        <div class="stat-card__label">Crime Rate</div>
+        <div class="stat-card__value" id="crime-rate-value">—</div>
+        <div class="stat-card__trend" id="crime-rate-trend"></div>
+      </div>
+
+      <!-- Ego Index -->
+      <div id="stat-ego" class="stat-card stat-card--ego">
+        <div class="stat-card__label">Ego Index</div>
+        <div class="stat-card__value" id="ego-index-value">—</div>
+        <div class="stat-card__bar">
+          <div class="stat-card__bar-fill stat-card__bar-fill--ego" id="ego-bar-fill" style="width: 0%"
+            role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Ego index level">
+          </div>
+        </div>
+      </div>
+
+      <!-- Lifespan -->
+      <div id="stat-lifespan" class="stat-card stat-card--lifespan">
+        <div class="stat-card__label">Lifespan</div>
+        <div class="stat-card__value" id="lifespan-value">—</div>
+        <div class="stat-card__trend" id="lifespan-trend"></div>
+      </div>
+    </section>
+
+    <!-- Agency Suspicion Panel -->
+    <section class="dashboard__agencies" aria-label="Agency suspicion levels">
+      <div class="dashboard__agencies-header">
+        <h2 class="section-label">Agency Suspicion</h2>
+      </div>
+      <div class="agency-list" id="agency-list" aria-label="Agency status list">
+        <!-- Populated by dashboard.js -->
+      </div>
+    </section>
+
+    <!-- World News Feed -->
+    <section class="dashboard__newsfeed" aria-label="World news feed">
+      <div class="dashboard__newsfeed-header">
+        <h2 class="section-label">World News Feed</h2>
+        <div class="dashboard__newsfeed-live" role="status" aria-live="polite">
+          <span class="dashboard__newsfeed-live-dot" aria-hidden="true"></span>
+          Live
+        </div>
+      </div>
+      <div class="news-list" id="news-list" aria-label="News items">
+        <!-- Populated by dashboard.js -->
+      </div>
+    </section>
+
+    <!-- Bottom Navigation -->
+    <nav class="dashboard__nav" aria-label="Game navigation">
+      <button id="nav-notebook" class="dashboard__nav-btn dashboard__nav-btn--primary">
+        <span class="dashboard__nav-btn-icon" aria-hidden="true">☽</span>
+        Open Notebook
+      </button>
+      <button id="nav-intel" class="dashboard__nav-btn">
+        <span class="dashboard__nav-btn-icon" aria-hidden="true">◎</span>
+        Intel
+      </button>
+      <button id="nav-companion" class="dashboard__nav-btn">
+        <span class="dashboard__nav-btn-icon" aria-hidden="true">◈</span>
+        Companion
+      </button>
+      <button id="nav-void" class="dashboard__nav-btn dashboard__nav-btn--gold">
+        <span class="dashboard__nav-btn-icon" aria-hidden="true">⬡</span>
+        Void
+      </button>
+    </nav>
+
+  </main>
+
+  <!-- Scripts — all modules so ES6 imports/exports work correctly -->
+  <script type="module" src="engine/gameState.js"></script>
+  <script type="module" src="engine/agencyEngine.js"></script>
+  <script type="module" src="engine/geminiEngine.js"></script>
+  <script type="module" src="screens/dashboard.js"></script>
+  <script type="module" src="screens/notebook.js"></script>
+  <script type="module" src="screens/intel.js"></script>
+
+</body>
+
+</html>

@@ -1,0 +1,711 @@
+/* ============================================================================
+   NULL — Dashboard Screen Styles
+   GDD Section 5.2 — Screen 1 + Section 5.3 Micro-Interactions
+   ============================================================================ */
+
+/* ---------------------------------------------------------------------------
+   Layout
+   --------------------------------------------------------------------------- */
+
+.dashboard {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  min-height: 100vh;
+  position: relative;
+  z-index: var(--z-base);
+}
+
+/* ---------------------------------------------------------------------------
+   Topbar — NULL title + Void button
+   --------------------------------------------------------------------------- */
+
+.dashboard__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--color-surface-border);
+}
+
+.dashboard__title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: var(--text-2xl);
+  letter-spacing: 0.32em;
+  color: var(--color-text-primary);
+  position: relative;
+  /* Faint text shadow for depth */
+  text-shadow: 0 0 40px rgba(232, 232, 232, 0.04);
+}
+
+/* Red underline — short, intentional */
+.dashboard__title::before {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 0;
+  width: 28px;
+  height: 1px;
+  background: var(--color-accent-primary);
+  opacity: 0.8;
+}
+
+/* Run indicator — top-right of the title */
+.dashboard__run-tag {
+  position: absolute;
+  top: 2px;
+  right: -48px;
+  font-family: var(--font-body);
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+}
+
+/* Void button */
+.dashboard__void-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-surface-border);
+  padding: 6px var(--space-md);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  position: relative;
+}
+
+.dashboard__void-btn:hover {
+  color: var(--color-accent-secondary);
+  border-color: rgba(212, 160, 23, 0.35);
+  background: var(--color-gold-glow);
+  box-shadow: 0 0 16px rgba(212, 160, 23, 0.07);
+}
+
+/* GDD 5.3 — Void portrait blinks once slowly when Ego crosses threshold */
+.dashboard__void-indicator {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: var(--color-accent-secondary);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: void-blink 5s ease-in-out infinite;
+}
+
+@keyframes void-blink {
+  0%, 80%, 100% { opacity: 1;   transform: scale(1); }
+  88%           { opacity: 0;   transform: scale(0.6); }
+  94%           { opacity: 0.5; transform: scale(0.8); }
+}
+
+/* ---------------------------------------------------------------------------
+   Stat Cards — three columns
+   GDD 5.2: Crime Rate | Ego Index | Lifespan
+   --------------------------------------------------------------------------- */
+
+.dashboard__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-md);
+}
+
+.stat-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-surface-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg) var(--space-md) var(--space-md);
+  position: relative;
+  overflow: hidden;
+  transition: border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.stat-card:hover {
+  border-color: var(--color-surface-border-bright);
+}
+
+/* Accent top stripe — color-coded per stat */
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  pointer-events: none;
+}
+
+.stat-card--crime::before  { background: linear-gradient(90deg, var(--color-accent-primary), transparent); }
+.stat-card--ego::before    { background: linear-gradient(90deg, var(--color-accent-secondary), transparent); }
+.stat-card--lifespan::before { background: linear-gradient(90deg, var(--color-text-muted), transparent); opacity: 0.4; }
+
+/* Subtle inner glow on hover */
+.stat-card--crime:hover {
+  box-shadow: inset 0 0 30px rgba(196, 30, 58, 0.04);
+}
+.stat-card--ego:hover {
+  box-shadow: inset 0 0 30px rgba(212, 160, 23, 0.04);
+}
+
+.stat-card__label {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-md);
+}
+
+/* Primary number — Cormorant Garamond for death-record elegance */
+.stat-card__value {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: var(--text-3xl);
+  line-height: 1;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-sm);
+  /* Tabular figures for clean alignment */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Trend line beneath the number */
+.stat-card__trend {
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+
+.stat-card__trend--down    { color: var(--color-safe-green-text); }
+.stat-card__trend--up      { color: var(--color-accent-primary); }
+.stat-card__trend--neutral { color: var(--color-text-muted); }
+
+/* Ego bar — thin, gold, 3s transition per GDD 5.3 */
+.stat-card__bar {
+  margin-top: var(--space-md);
+  height: 2px;
+  background: var(--color-surface-border);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.stat-card__bar-fill {
+  height: 100%;
+  border-radius: 1px;
+  width: 0%;
+  transition: width var(--duration-bar) var(--ease-out);
+}
+
+.stat-card__bar-fill--ego {
+  background: linear-gradient(90deg, #8a6200, var(--color-accent-secondary), #f0c040);
+  box-shadow: 0 0 6px rgba(212, 160, 23, 0.4);
+}
+
+/* ---------------------------------------------------------------------------
+   Agency Suspicion Panel
+   --------------------------------------------------------------------------- */
+
+.dashboard__agencies {
+  background: var(--color-surface);
+  border: 1px solid var(--color-surface-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg) var(--space-md);
+  position: relative;
+  overflow: hidden;
+}
+
+.dashboard__agencies-header {
+  margin-bottom: var(--space-xl);
+}
+
+.agency-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+/* Three-column grid: name | bar+percent | status */
+.agency-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 108px;
+  align-items: center;
+  gap: var(--space-md);
+  position: relative;
+}
+
+/* Subtle hover state — entire row brightens slightly */
+.agency-row::after {
+  content: '';
+  position: absolute;
+  inset: -8px -12px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  transition: background var(--duration-fast) var(--ease-out);
+  pointer-events: none;
+}
+
+.agency-row:hover::after {
+  background: rgba(255,255,255,0.012);
+}
+
+.agency-row__name {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
+  color: var(--color-text-primary);
+}
+
+.agency-row__bar-container {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* The track */
+.agency-row__bar {
+  flex: 1;
+  height: 5px;
+  background: var(--color-surface-border);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* The fill — starts at 0%, transitions to target over 3s (GDD 5.3) */
+.agency-row__bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  /* GDD 5.3: "animate upward over 3 seconds after kill" */
+  transition: width var(--duration-bar) var(--ease-out);
+  position: relative;
+}
+
+/* Shimmer on the bar fill — makes it feel alive */
+.agency-row__bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+  animation: bar-shimmer 4s ease-in-out infinite;
+  animation-delay: 3s; /* starts after the fill transition finishes */
+}
+
+@keyframes bar-shimmer {
+  0%   { left: -100%; }
+  50%  { left: 100%; }
+  100% { left: 100%; }
+}
+
+/* Intensity-based fill colours */
+.agency-row__bar-fill--low {
+  background: var(--color-agency-blue);
+}
+.agency-row__bar-fill--medium {
+  background: linear-gradient(90deg, var(--color-agency-blue), var(--color-agency-blue-bright));
+}
+.agency-row__bar-fill--high {
+  background: linear-gradient(90deg, var(--color-agency-blue-bright), #c46030);
+  box-shadow: 0 0 8px rgba(196, 96, 48, 0.3);
+}
+.agency-row__bar-fill--critical {
+  background: linear-gradient(90deg, #a01530, var(--color-accent-primary));
+  box-shadow: 0 0 10px rgba(196, 30, 58, 0.4);
+}
+
+/* Critical bar pulses gently */
+.agency-row__bar-fill--critical {
+  animation: bar-critical-pulse 2.5s ease-in-out infinite;
+  animation-delay: 3.2s;
+}
+
+@keyframes bar-critical-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.75; }
+}
+
+.agency-row__percent {
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  min-width: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status badge */
+.agency-row__status {
+  font-family: var(--font-body);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px var(--space-sm);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.agency-row__status--UNAWARE {
+  color: var(--color-text-muted);
+  border-color: var(--color-surface-border);
+  background: transparent;
+  opacity: 0.6;
+}
+
+.agency-row__status--MONITORING {
+  color: #4a7aac;
+  border-color: rgba(26, 58, 92, 0.5);
+  background: rgba(26, 58, 92, 0.15);
+}
+
+.agency-row__status--ACTIVE {
+  color: var(--color-warning-amber);
+  border-color: rgba(212, 160, 23, 0.25);
+  background: rgba(212, 160, 23, 0.07);
+}
+
+.agency-row__status--HUNTING {
+  color: #e03355;
+  border-color: rgba(196, 30, 58, 0.3);
+  background: rgba(196, 30, 58, 0.08);
+}
+
+/* CLOSING IN — the most dangerous state. Red glow, pulsing. GDD 5.3. */
+.agency-row__status--CLOSING_IN {
+  color: #ff4466;
+  border-color: rgba(255, 68, 102, 0.4);
+  background: rgba(255, 68, 102, 0.10);
+  animation: closing-in-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(255, 68, 102, 0.2);
+}
+
+@keyframes closing-in-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(255, 68, 102, 0.2); }
+  50%       { opacity: 0.7; box-shadow: 0 0 0px rgba(255, 68, 102, 0); }
+}
+
+/* ---------------------------------------------------------------------------
+   News Feed
+   GDD 5.3: Items fade in one word at a time — teleprinter effect
+   --------------------------------------------------------------------------- */
+
+.dashboard__newsfeed {
+  background: var(--color-surface);
+  border: 1px solid var(--color-surface-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg) var(--space-md);
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.dashboard__newsfeed-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-xl);
+}
+
+/* LIVE indicator */
+.dashboard__newsfeed-live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent-primary);
+  opacity: 0.8;
+}
+
+.dashboard__newsfeed-live-dot {
+  width: 5px;
+  height: 5px;
+  background: var(--color-accent-primary);
+  border-radius: 50%;
+  animation: live-ripple 2.4s ease-in-out infinite;
+}
+
+@keyframes live-ripple {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 0 0px rgba(196, 30, 58, 0.5); }
+  60%       { opacity: 0.6; box-shadow: 0 0 0 5px rgba(196, 30, 58, 0); }
+}
+
+.news-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each news item fades in as a whole container — 
+   the teleprinter word-by-word is done on the headline spans (via JS) */
+.news-item {
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--color-surface-border);
+  display: flex;
+  gap: var(--space-md);
+  position: relative;
+}
+
+.news-item:last-child {
+  border-bottom: none;
+}
+
+/* The ▸ marker */
+.news-item__marker {
+  color: var(--color-accent-primary);
+  font-size: 0.6rem;
+  margin-top: 4px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.news-item__content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Headline text — words are wrapped in <span class="news-word"> by JS
+   each word fades in sequentially */
+.news-item__headline {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  /* Slight left-margin inside quote renders at 0.9 line-height */
+}
+
+/* Individual word span — injected by JS for teleprinter effect */
+.news-word {
+  display: inline;
+  opacity: 0;
+  animation: word-appear 80ms ease-out forwards;
+}
+
+@keyframes word-appear {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Source + timestamp */
+.news-item__meta {
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+  letter-spacing: 0.03em;
+}
+
+/* New item push — items entering from top (post-kill) */
+.news-item--new {
+  animation: news-push-in 0.5s var(--ease-out) forwards;
+}
+
+@keyframes news-push-in {
+  from { opacity: 0; transform: translateY(-8px); max-height: 0; }
+  to   { opacity: 1; transform: translateY(0);    max-height: 120px; }
+}
+
+/* ---------------------------------------------------------------------------
+   Bottom Navigation
+   --------------------------------------------------------------------------- */
+
+.dashboard__nav {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-sm);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-surface-border);
+}
+
+.dashboard__nav-btn {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+  border: 1px solid var(--color-surface-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  padding: var(--space-md) var(--space-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  position: relative;
+}
+
+/* Scan-line micro-texture on nav buttons */
+.dashboard__nav-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(255,255,255,0.008) 3px,
+    rgba(255,255,255,0.008) 4px
+  );
+  pointer-events: none;
+}
+
+.dashboard__nav-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-surface-border-bright);
+  background: var(--color-surface-raised);
+}
+
+.dashboard__nav-btn:active {
+  transform: scale(0.97);
+  transition-duration: 60ms;
+}
+
+/* Open Notebook — most important button: crimson, never bold-red */
+.dashboard__nav-btn--primary {
+  border-color: rgba(196, 30, 58, 0.45);
+  color: var(--color-accent-primary);
+}
+
+.dashboard__nav-btn--primary:hover {
+  background: rgba(196, 30, 58, 0.07);
+  border-color: var(--color-accent-primary);
+  /* Cold white icon — not exciting, intentional per GDD */
+  color: var(--color-text-primary);
+  box-shadow: 0 0 16px rgba(196, 30, 58, 0.10);
+}
+
+/* Void — gold */
+.dashboard__nav-btn--gold {
+  color: rgba(212, 160, 23, 0.7);
+  border-color: rgba(212, 160, 23, 0.25);
+}
+
+.dashboard__nav-btn--gold:hover {
+  background: rgba(212, 160, 23, 0.05);
+  border-color: rgba(212, 160, 23, 0.5);
+  color: var(--color-accent-secondary);
+  box-shadow: 0 0 14px rgba(212, 160, 23, 0.09);
+}
+
+.dashboard__nav-btn-icon {
+  display: block;
+  font-size: var(--text-md);
+  margin-bottom: var(--space-xs);
+  line-height: 1.4;
+}
+
+/* ---------------------------------------------------------------------------
+   Eyes Deal Timer — persistent when active, top-right
+   --------------------------------------------------------------------------- */
+
+.eyes-timer {
+  position: fixed;
+  top: var(--space-md);
+  right: var(--space-md);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  color: var(--color-eyes-accent);
+  background: rgba(15, 0, 0, 0.92);
+  border: 1px solid rgba(255, 0, 0, 0.25);
+  padding: 5px var(--space-md);
+  border-radius: var(--radius-sm);
+  z-index: var(--z-overlay);
+  display: none;
+  letter-spacing: 0.16em;
+  backdrop-filter: blur(4px);
+}
+
+body.eyes-deal-active .eyes-timer { display: block; }
+
+/* ---------------------------------------------------------------------------
+   Mobile responsive — GDD Section 5.4
+   --------------------------------------------------------------------------- */
+
+@media (max-width: 768px) {
+  .dashboard {
+    padding: var(--space-lg) var(--space-md);
+    gap: var(--space-lg);
+  }
+
+  .dashboard__stats {
+    grid-template-columns: 1fr;
+    gap: var(--space-sm);
+  }
+
+  .stat-card {
+    padding: var(--space-md);
+  }
+
+  .stat-card__value {
+    font-size: var(--text-2xl);
+  }
+
+  .agency-row {
+    grid-template-columns: 48px 1fr 90px;
+    gap: var(--space-sm);
+  }
+
+  .dashboard__nav {
+    gap: var(--space-xs);
+  }
+
+  .dashboard__nav-btn {
+    padding: var(--space-sm) var(--space-xs);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard {
+    padding: var(--space-md) var(--space-sm);
+  }
+
+  .dashboard__title {
+    font-size: var(--text-xl);
+    letter-spacing: 0.24em;
+  }
+
+  .agency-row {
+    grid-template-columns: 40px 1fr;
+    gap: var(--space-xs);
+    grid-template-rows: auto auto;
+  }
+
+  .agency-row__status {
+    grid-column: 2;
+    text-align: left;
+    width: fit-content;
+  }
+
+  .dashboard__nav {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-xs);
+  }
+}
