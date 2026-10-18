@@ -17,7 +17,7 @@
 // in index.html — never commit the raw key to source control.
 const GEMINI_API_KEY =
   (typeof window !== 'undefined' && window.__NULL_CONFIG?.GEMINI_API_KEY) ||
-  'AIzaSyAQYoGEMsxBuh5wONG5BD5uPCmhvPxI-L4';
+  '';
 
 // Gemini 2.5 Flash — fast, capable model confirmed available on this API key.
 // Spiritually equivalent to the GDD's "Gemini 1.5 Flash" intent: free-tier, fast,
