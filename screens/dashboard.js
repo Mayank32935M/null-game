@@ -1,79 +1,20 @@
 // ============================================================================
-// NULL — Dashboard Screen
+// NULL — Dashboard Screen (v2)
 // GDD Section 5.2 — Screen 1: The Dashboard
-// GDD Section 5.3 — Micro-interactions
-// Hardcoded dummy data — no live game state wired yet
+// Master Prompt Section 11 & Section 4
+//
+// Shows the state of the world, recent events, crime index, important
+// social indicators, and investigation pressure. Allows advancing time nonlethally.
 // ============================================================================
 
-// ---------------------------------------------------------------------------
-// Dummy Data (India region — Aryan Mathur)
-// ---------------------------------------------------------------------------
+import { getGameState, getRNG, saveGame } from '../engine/gameState.js';
+import { resolveAction, ACTION_TYPES } from '../engine/actionEngine.js';
+import { getAgencyIntelSummary, STATUS_LABELS } from '../engine/agencyEngine.js';
 
-const DUMMY_STATE = {
-  region: 'india',
-  playerName: 'Aryan Mathur',
-  runNumber: 1,
-  crimeRate: 87.3,
-  crimeDelta: -12.7,
-  egoIndex: 42,
-  lifespanDays: 9847,
-  agencySuspicion: {
-    CBI: 78,
-    RAW: 31,
-    IB: 9,
-  },
-  agencyStatus: {
-    CBI: 'ACTIVE',
-    RAW: 'MONITORING',
-    IB: 'UNAWARE',
-  },
-  newsFeed: [
-    {
-      headline:
-        'Third cardiac death this week raises questions among Delhi police — "statistical anomaly" or something else?',
-      source: 'The Indian Express',
-      timestamp: '2 min ago',
-    },
-    {
-      headline:
-        'CBI forms special task force following series of unexplained deaths among high-profile corruption suspects.',
-      source: 'NDTV',
-      timestamp: '18 min ago',
-    },
-    {
-      headline:
-        'Public fear rises as pattern emerges — social media users coin term "divine justice" for sudden criminal deaths.',
-      source: 'The Wire',
-      timestamp: '1 hr ago',
-    },
-  ],
-};
+// Teleprinter timing constants
+const WORD_INTERVAL_MS = 45;
+const ITEM_STAGGER_MS  = 140;
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const STATUS_LABELS = {
-  UNAWARE:    'Unaware',
-  MONITORING: 'Monitoring',
-  ACTIVE:     'Active',
-  HUNTING:    'Hunting',
-  CLOSING_IN: 'Closing In',
-};
-
-// Teleprinter: ms between each word appearing
-const WORD_INTERVAL_MS = 55;
-// Teleprinter: ms between each news item starting (stagger)
-const ITEM_STAGGER_MS  = 180;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Returns an intensity class suffix based on agency suspicion percent.
- * Used to pick the correct bar-fill color variant.
- */
 function getSuspicionIntensity(percent) {
   if (percent >= 75) return 'critical';
   if (percent >= 50) return 'high';
@@ -81,40 +22,11 @@ function getSuspicionIntensity(percent) {
   return 'low';
 }
 
-/**
- * Wraps each word in a headline string in a <span class="news-word"> element
- * so the CSS animation can target them individually.
- * Returns a DocumentFragment of spans with spaces between.
- */
-function buildTeleprinterSpans(text) {
-  const words = text.split(' ');
-  const frag = document.createDocumentFragment();
-
-  words.forEach((word, i) => {
-    const span = document.createElement('span');
-    span.classList.add('news-word');
-    // Animation delay grows per word — teleprinter drip effect
-    span.style.animationDelay = `${i * WORD_INTERVAL_MS}ms`;
-    span.textContent = word;
-    frag.appendChild(span);
-
-    // Space between words (not wrapped — always visible)
-    if (i < words.length - 1) {
-      frag.appendChild(document.createTextNode(' '));
-    }
-  });
-
-  return frag;
-}
-
-/**
- * Performs two nested rAF calls to ensure the browser has painted the
- * element at width:0 before we apply the target width for the transition.
- */
 function animateBarFill(el, targetWidth) {
+  if (!el) return;
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      el.style.width = `${targetWidth}%`;
+      el.style.width = `${Math.min(100, Math.max(0, targetWidth))}%`;
     });
   });
 }
@@ -124,68 +36,89 @@ function animateBarFill(el, targetWidth) {
 // ---------------------------------------------------------------------------
 
 function renderStatCards(state) {
-  // — Crime Rate —
+  const gs = state || getGameState();
+  if (!gs) return;
+
+  // 1. Crime Index
   const crimeValue = document.getElementById('crime-rate-value');
   const crimeTrend = document.getElementById('crime-rate-trend');
 
-  crimeValue.textContent = `${state.crimeRate}%`;
+  const crime = typeof gs.crimeIndex === 'number'
+    ? gs.crimeIndex
+    : (typeof gs.crimeRate === 'number' ? gs.crimeRate : 100);
 
-  if (state.crimeDelta < 0) {
-    crimeTrend.textContent = `↓ ${Math.abs(state.crimeDelta).toFixed(1)}% from start`;
-    crimeTrend.classList.add('stat-card__trend--down');
-  } else if (state.crimeDelta > 0) {
-    crimeTrend.textContent = `↑ ${state.crimeDelta.toFixed(1)}% from start`;
-    crimeTrend.classList.add('stat-card__trend--up');
-  } else {
-    crimeTrend.textContent = 'No change';
-    crimeTrend.classList.add('stat-card__trend--neutral');
+  const initialCrime = 100;
+  const delta = crime - initialCrime;
+
+  if (crimeValue) crimeValue.textContent = `${crime.toFixed(1)}%`;
+
+  if (crimeTrend) {
+    if (delta < 0) {
+      crimeTrend.textContent = `↓ ${Math.abs(delta).toFixed(1)}% (Goal: < 25%)`;
+      crimeTrend.className = 'stat-card__trend stat-card__trend--down';
+    } else if (delta > 0) {
+      crimeTrend.textContent = `↑ ${delta.toFixed(1)}% (Goal: < 25%)`;
+      crimeTrend.className = 'stat-card__trend stat-card__trend--up';
+    } else {
+      crimeTrend.textContent = 'Baseline (Goal: < 25%)';
+      crimeTrend.className = 'stat-card__trend stat-card__trend--neutral';
+    }
   }
 
-  // — Ego Index —
+  // 2. Exposure / Threat Index
+  const egoLabel = document.querySelector('#stat-ego .stat-card__label');
   const egoValue = document.getElementById('ego-index-value');
   const egoBar   = document.getElementById('ego-bar-fill');
 
-  egoValue.textContent = `${state.egoIndex}%`;
-  animateBarFill(egoBar, state.egoIndex);
+  const exposure = Math.round(gs.indicators?.playerExposure ?? gs.exposureRisk ?? gs.egoIndex ?? 0);
+  if (egoLabel) egoLabel.textContent = 'Attribution Risk';
+  if (egoValue) egoValue.textContent = `${exposure}%`;
+  animateBarFill(egoBar, exposure);
 
-  // — Lifespan —
+  // 3. Lifespan
   const lifespanValue = document.getElementById('lifespan-value');
   const lifespanTrend = document.getElementById('lifespan-trend');
 
-  lifespanValue.textContent = state.lifespanDays.toLocaleString('en-IN') + ' days';
+  const days = gs.lifespanDays || 0;
+  if (lifespanValue) lifespanValue.textContent = days.toLocaleString() + ' days';
 
-  const years = (state.lifespanDays / 365.25).toFixed(1);
-  lifespanTrend.textContent = `≈ ${years} yrs remaining`;
-  lifespanTrend.classList.add('stat-card__trend--neutral');
+  const years = (days / 365.25).toFixed(1);
+  if (lifespanTrend) {
+    lifespanTrend.textContent = `≈ ${years} yrs natural lifespan`;
+    lifespanTrend.className = 'stat-card__trend stat-card__trend--neutral';
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Render: Agency suspicion bars
-// GDD 5.3: Suspicion meters never jump instantly — animate upward over 3s
 // ---------------------------------------------------------------------------
 
 function renderAgencies(state) {
   const container = document.getElementById('agency-list');
+  if (!container) return;
   container.innerHTML = '';
 
-  const agencies = Object.keys(state.agencySuspicion);
+  const gs = state || getGameState();
+  if (!gs) return;
 
-  agencies.forEach((agencyName) => {
-    const suspicion = state.agencySuspicion[agencyName];
-    const status    = state.agencyStatus[agencyName];
+  const intelSummaries = getAgencyIntelSummary(gs);
+
+  intelSummaries.forEach((agency) => {
+    const suspicion = agency.suspicion;
+    const status    = agency.status;
     const intensity = getSuspicionIntensity(suspicion);
-    const barId     = `agency-bar-${agencyName.toLowerCase()}`;
+    const barId     = `agency-bar-${agency.agency.toLowerCase()}`;
 
     const row = document.createElement('div');
     row.classList.add('agency-row');
-    row.id = `agency-${agencyName.toLowerCase()}`;
+    row.id = `agency-${agency.agency.toLowerCase()}`;
 
     row.innerHTML = `
-      <span class="agency-row__name">${agencyName}</span>
+      <span class="agency-row__name">${agency.agency}</span>
       <div class="agency-row__bar-container">
         <div class="agency-row__bar" role="progressbar"
              aria-valuenow="${suspicion}" aria-valuemin="0" aria-valuemax="100"
-             aria-label="${agencyName} suspicion">
+             aria-label="${agency.agency} suspicion">
           <div class="agency-row__bar-fill agency-row__bar-fill--${intensity}"
                id="${barId}"
                style="width: 0%"></div>
@@ -193,15 +126,13 @@ function renderAgencies(state) {
         <span class="agency-row__percent">${suspicion}%</span>
       </div>
       <span class="agency-row__status agency-row__status--${status}"
-            aria-label="${agencyName} status: ${STATUS_LABELS[status] || status}">
-        ${STATUS_LABELS[status] || status}
+            aria-label="${agency.agency} status: ${agency.statusLabel || status}">
+        ${agency.statusLabel || status}
       </span>
     `;
 
     container.appendChild(row);
 
-    // GDD 5.3: bars animate upward over 3 seconds — CSS handles the 3s transition,
-    // we just need to set the target width in the next paint cycle.
     const barFill = row.querySelector(`#${barId}`);
     animateBarFill(barFill, suspicion);
   });
@@ -209,18 +140,28 @@ function renderAgencies(state) {
 
 // ---------------------------------------------------------------------------
 // Render: News feed
-// GDD 5.3: Feed items fade in one word at a time — teleprinter effect
 // ---------------------------------------------------------------------------
 
 function renderNewsFeed(state) {
   const container = document.getElementById('news-list');
+  if (!container) return;
   container.innerHTML = '';
 
-  state.newsFeed.forEach((item, itemIndex) => {
+  const gs = state || getGameState();
+  if (!gs) return;
+
+  const feed = gs.newsFeed && gs.newsFeed.length > 0 ? gs.newsFeed : [
+    {
+      headline: 'Intelligence wire active. Monitoring global indicators and unexplained casualties.',
+      source: 'Global Wire',
+      timestamp: 'Turn 0',
+    }
+  ];
+
+  feed.slice(0, 10).forEach((item, itemIndex) => {
     const newsEl = document.createElement('div');
     newsEl.classList.add('news-item');
 
-    // Build structure
     const marker = document.createElement('span');
     marker.classList.add('news-item__marker');
     marker.setAttribute('aria-hidden', 'true');
@@ -231,56 +172,26 @@ function renderNewsFeed(state) {
 
     const headline = document.createElement('p');
     headline.classList.add('news-item__headline');
+    headline.textContent = item.headline || '';
 
     const meta = document.createElement('span');
     meta.classList.add('news-item__meta');
-    meta.textContent = `${item.source} · ${item.timestamp}`;
+    meta.textContent = `${item.source || 'News'} · ${item.timestamp || 'just now'}`;
 
     content.appendChild(headline);
     content.appendChild(meta);
     newsEl.appendChild(marker);
     newsEl.appendChild(content);
     container.appendChild(newsEl);
-
-    // GDD 5.3 teleprinter: stagger each item's word stream start
-    const itemDelay = itemIndex * ITEM_STAGGER_MS * 6;
-
-    // Count total words across previous items so delays are continuous
-    const prevWordCount = state.newsFeed
-      .slice(0, itemIndex)
-      .reduce((acc, i) => acc + i.headline.split(' ').length, 0);
-
-    // Build teleprinter spans with running delay offset
-    const words = item.headline.split(' ');
-    const baseDelay = itemDelay + (prevWordCount * WORD_INTERVAL_MS * 0.3);
-
-    const frag = document.createDocumentFragment();
-    words.forEach((word, wi) => {
-      const span = document.createElement('span');
-      span.classList.add('news-word');
-      span.style.animationDelay = `${baseDelay + wi * WORD_INTERVAL_MS}ms`;
-      span.textContent = word;
-      frag.appendChild(span);
-      if (wi < words.length - 1) {
-        frag.appendChild(document.createTextNode(' '));
-      }
-    });
-
-    headline.appendChild(frag);
   });
 }
 
-// ---------------------------------------------------------------------------
-// Prepend a new news item (called post-kill in future milestones)
-// GDD 5.3: New items push from top
-// ---------------------------------------------------------------------------
-
 export function prependNewsItem(item) {
   const container = document.getElementById('news-list');
-  if (!container) return;
+  if (!container || !item) return;
 
   const newsEl = document.createElement('div');
-  newsEl.classList.add('news-item', 'news-item--new');
+  newsEl.classList.add('news-item');
 
   const marker = document.createElement('span');
   marker.classList.add('news-item__marker');
@@ -292,18 +203,7 @@ export function prependNewsItem(item) {
 
   const headline = document.createElement('p');
   headline.classList.add('news-item__headline');
-
-  const words = item.headline.split(' ');
-  const frag = document.createDocumentFragment();
-  words.forEach((word, i) => {
-    const span = document.createElement('span');
-    span.classList.add('news-word');
-    span.style.animationDelay = `${i * WORD_INTERVAL_MS}ms`;
-    span.textContent = word;
-    frag.appendChild(span);
-    if (i < words.length - 1) frag.appendChild(document.createTextNode(' '));
-  });
-  headline.appendChild(frag);
+  headline.textContent = item.headline || '';
 
   const meta = document.createElement('span');
   meta.classList.add('news-item__meta');
@@ -314,11 +214,29 @@ export function prependNewsItem(item) {
   newsEl.appendChild(marker);
   newsEl.appendChild(content);
 
-  // Push from top, trim to 5 items max
   container.insertBefore(newsEl, container.firstChild);
   const items = container.querySelectorAll('.news-item');
-  if (items.length > 5) {
+  if (items.length > 10) {
     container.removeChild(items[items.length - 1]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Nonlethal Advance Action (Wait / Observe)
+// ---------------------------------------------------------------------------
+
+function handleWaitTurn() {
+  const gs = getGameState();
+  if (!gs) return;
+
+  const rng = getRNG();
+  const result = resolveAction(ACTION_TYPES.WAIT, {}, gs, rng);
+
+  if (result.success) {
+    saveGame();
+    window.gameState = gs;
+    initDashboard();
+    window.dispatchEvent(new CustomEvent('null:kill-complete'));
   }
 }
 
@@ -327,7 +245,27 @@ export function prependNewsItem(item) {
 // ---------------------------------------------------------------------------
 
 function initDashboard() {
-  const state = window.gameState || DUMMY_STATE;
+  const state = getGameState();
+  if (!state) return;
+
+  // Update run tag in header
+  const runTag = document.querySelector('.dashboard__run-tag');
+  if (runTag) {
+    runTag.textContent = `TURN ${state.turn || 0} · RUN ${(state.runNumber || 1).toString().padStart(2, '0')}`;
+  }
+
+  // Ensure "Observe / Wait" button exists in navigation or header
+  const topBar = document.querySelector('.dashboard__topbar');
+  if (topBar && !document.getElementById('wait-turn-btn')) {
+    const waitBtn = document.createElement('button');
+    waitBtn.id = 'wait-turn-btn';
+    waitBtn.className = 'dashboard__wait-btn';
+    waitBtn.setAttribute('title', 'Advance world by one turn without writing in the ledger');
+    waitBtn.innerHTML = '<span>⏳</span> ADVANCE TURN';
+    waitBtn.addEventListener('click', handleWaitTurn);
+    topBar.insertBefore(waitBtn, topBar.querySelector('#void-btn'));
+  }
+
   renderStatCards(state);
   renderAgencies(state);
   renderNewsFeed(state);
@@ -339,24 +277,14 @@ if (document.readyState === 'loading') {
   initDashboard();
 }
 
-// ---------------------------------------------------------------------------
-// Exports
-// ---------------------------------------------------------------------------
-
-// FIX 5: prependNewsItem already has inline `export` — keep only that, no duplicate here
 export { renderStatCards, renderAgencies, renderNewsFeed, initDashboard };
 
-// Expose on window for cross-module access from notebook.js (kill updates)
 window.renderStatCards  = renderStatCards;
 window.renderAgencies   = renderAgencies;
 window.renderNewsFeed   = renderNewsFeed;
 window.prependNewsItem  = prependNewsItem;
+window.initDashboard    = initDashboard;
 
-// FIX 1: Listen for kill-complete — re-render all three panels with live state
 window.addEventListener('null:kill-complete', () => {
-  const state = window.gameState || DUMMY_STATE;
-  renderStatCards(state);
-  renderAgencies(state);
-  renderNewsFeed(state);
+  initDashboard();
 });
-

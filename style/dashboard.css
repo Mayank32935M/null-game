@@ -54,18 +54,20 @@
   opacity: 0.8;
 }
 
-/* Run indicator — top-right of the title */
+/* Run indicator — next to title */
 .dashboard__run-tag {
-  position: absolute;
-  top: 2px;
-  right: -48px;
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 14px;
+  top: -2px;
   font-family: var(--font-body);
-  font-size: 0.58rem;
+  font-size: 0.65rem;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--color-text-muted);
-  opacity: 0.6;
+  opacity: 0.8;
 }
 
 /* Void button */

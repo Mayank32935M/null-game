@@ -1,29 +1,30 @@
 // ============================================================================
-// NULL — Null Book Screen
-// GDD Section 5.2 — Screen 2: The Null Book
-// GDD Section 2.3 — Kill System
+// NULL — The Ledger (Notebook Screen)
+// GDD Section 5.2 — Screen 2: The Null Book / Ledger
+// Master Prompt Section 9: Supernatural Artefact & Lifespan System
 //
-// Responsibility:
-//   Renders the Null Book UI — name input, identity panel, cause of death
-//   selector, time & final actions fields, and the WRITE NAME hold button.
-//   On hold-complete: calls geminiEngine.worldReactionPrompt / callGemini,
-//   validates + applies the world reaction delta, saves to localStorage,
-//   plays the ink-spread animation, then redirects to dashboard.
+// Validates target details, causes of death, time and final actions.
+// Submits actions authoritatively to actionEngine (deterministic simulation),
+// triggers narrative generation via narrativeEngine, and plays the ink animation.
 // ============================================================================
 
-import { callGemini, buildWorldReactionPrompt, applyWorldReaction, validateWorldReaction } from '../engine/geminiEngine.js';
-import { getGameState, saveGame, getRunHistory, clamp } from '../engine/gameState.js';
+import { resolveAction, ACTION_TYPES } from '../engine/actionEngine.js';
+import { getGameState, getRNG, saveGame, getRunHistory, clamp } from '../engine/gameState.js';
 import { updateAllAgencyStatuses } from '../engine/agencyEngine.js';
+import { geminiProvider } from '../engine/geminiEngine.js';
+import { requestNarrative, buildNarrativeContext, escapeHTML } from '../engine/narrativeEngine.js';
+import { LEDGER_RULES, CHARACTERS } from '../data/universe.js';
+import { EVENT_TYPES } from '../engine/eventEngine.js';
 
 // ---------------------------------------------------------------------------
-// Constants — GDD 2.3
+// Constants & Configuration
 // ---------------------------------------------------------------------------
 
-/** Kill methods — maps method key → display metadata */
+/** Kill methods — matches universe.js causes */
 const KILL_METHODS = [
   {
-    key: 'heartAttack',
-    name: 'Heart Attack',
+    key: 'cardiac',
+    name: 'Cardiac Arrest',
     icon: '♡',
     desc: 'Silent. Untraceable. The heart simply stops.',
     risk: 'low',
@@ -33,23 +34,23 @@ const KILL_METHODS = [
     key: 'accident',
     name: 'Accident',
     icon: '⚡',
-    desc: 'Staged misfortune. Plausible, if imperfect.',
+    desc: 'Staged misfortune. Plausible if not overused.',
     risk: 'med',
     riskLabel: 'Med Risk',
   },
   {
-    key: 'publicDeath',
-    name: 'Public Death',
+    key: 'publicCollapse',
+    name: 'Public Collapse',
     icon: '◉',
-    desc: 'Visible. Unmistakable. The city will see.',
+    desc: 'Visible. Unmistakable. The city will remember.',
     risk: 'high',
     riskLabel: 'High Risk',
   },
   {
-    key: 'manipulated',
-    name: 'Manipulated',
+    key: 'orchestrated',
+    name: 'Orchestrated',
     icon: '◈',
-    desc: 'Let others do it. Threads remain.',
+    desc: 'Others carry it out. Threads remain.',
     risk: 'med',
     riskLabel: 'Med Risk',
   },
@@ -58,25 +59,25 @@ const KILL_METHODS = [
 /** Target types — maps type key → display metadata */
 const TARGET_TYPES = [
   {
-    key: 'pettyCriminal',
-    label: 'Petty Criminal',
+    key: 'petty_criminal',
+    label: 'Street Offender',
     chipClass: 'identity-chip--petty',
-    crimePreview: '−0.3 to −1.5',
+    crimePreview: '−0.5 to −1.5',
     desc: 'Low-level offender. Marginal reduction.',
   },
   {
-    key: 'corruptOfficial',
+    key: 'corrupt_official',
     label: 'Corrupt Official',
     chipClass: 'identity-chip--official',
-    crimePreview: '−1.5 to −4',
-    desc: 'Position abused. Systemic rot, excised.',
+    crimePreview: '−2.0 to −5.0',
+    desc: 'Position abused. Systemic rot excised.',
   },
   {
-    key: 'systemicCriminal',
-    label: 'Systemic Criminal',
+    key: 'syndicate_leader',
+    label: 'Syndicate Leader',
     chipClass: 'identity-chip--systemic',
-    crimePreview: '−3 to −8',
-    desc: 'Network-level threat. Significant impact.',
+    crimePreview: '−4.0 to −9.0',
+    desc: 'Network-level threat. High risk of power vacuum.',
   },
 ];
 
@@ -97,17 +98,22 @@ let _holdActive = false;
 /** Current form values */
 const form = {
   name: '',
-  targetType: null,     // pettyCriminal | corruptOfficial | systemicCriminal
-  method: null,         // heartAttack | accident | publicDeath | manipulated
+  targetId: null,
+  targetType: null,
+  method: null,
   time: '',
   finalActions: '',
 };
 
 // ---------------------------------------------------------------------------
-// HTML Template — injected into the page
+// HTML Template
 // ---------------------------------------------------------------------------
 
 function buildNotebookHTML() {
+  const gameState = getGameState();
+  const characters = gameState?.characters || CHARACTERS;
+  const aliveCharacters = Object.entries(characters).filter(([_, c]) => c.isAlive !== false);
+
   return `
   <main id="notebook-screen" class="notebook-screen hidden screen" aria-label="The Null Book">
 
@@ -116,18 +122,38 @@ function buildNotebookHTML() {
       <button id="notebook-back-btn" class="notebook__back-btn" aria-label="Return to dashboard">
         ← Dashboard
       </button>
-      <h1 class="notebook__title" aria-label="Null Book">NULL BOOK</h1>
-      <span class="notebook__kill-count" id="notebook-kill-count" aria-live="polite">0 entries</span>
+      <h1 class="notebook__title" aria-label="Null Book">THE LEDGER</h1>
+      <div class="notebook__meta-info">
+        <span class="notebook__lifespan" id="notebook-lifespan" title="Remaining natural lifespan">
+          ⏳ ${gameState?.lifespanDays || 9847}d
+        </span>
+        <span class="notebook__kill-count" id="notebook-kill-count" aria-live="polite">
+          ${gameState?.totalLedgerEntries || 0} entries
+        </span>
+      </div>
     </header>
 
     <!-- The Book Panel -->
-    <div class="null-book" role="form" aria-label="Kill entry form">
+    <div class="null-book" role="form" aria-label="Ledger entry form">
       <div class="null-book__form">
+
+        <!-- ── Target Quick Pick ── -->
+        <section class="target-select-section">
+          <label class="book__section-label" for="target-dossier-select">
+            Known World Targets <span style="opacity:0.4; font-weight:400">(select or write manually below)</span>
+          </label>
+          <select id="target-dossier-select" class="field-select">
+            <option value="">— Select a dossier target (optional) —</option>
+            ${aliveCharacters.map(([id, c]) => `
+              <option value="${id}">${escapeHTML(c.name)} (${escapeHTML(c.role)})</option>
+            `).join('')}
+          </select>
+        </section>
 
         <!-- ── Name Input ── -->
         <section class="name-input-block" aria-labelledby="name-section-label">
           <label class="book__section-label" id="name-section-label" for="target-name-input">
-            Name
+            True Legal Name
           </label>
           <div class="name-input-wrapper" id="name-input-wrapper">
             <input
@@ -146,13 +172,13 @@ function buildNotebookHTML() {
             <div class="name-input-inkdrop" aria-hidden="true"></div>
           </div>
           <span id="name-field-error" class="field-error-msg" role="alert" aria-live="polite">
-            A name must be written.
+            A legal name must be written in the Ledger.
           </span>
         </section>
 
-        <!-- ── Identity Confirm ── -->
+        <!-- ── Target Profile / Identity Confirm ── -->
         <section class="identity-panel" aria-labelledby="identity-section-label">
-          <div class="book__section-label" id="identity-section-label">Identity</div>
+          <div class="book__section-label" id="identity-section-label">Target Profile</div>
           <div class="identity-chips" role="group" aria-label="Target type selection" id="identity-chips">
             ${TARGET_TYPES.map(t => `
               <button
@@ -169,10 +195,10 @@ function buildNotebookHTML() {
           </div>
           <div class="identity-preview" id="identity-preview" aria-live="polite">
             <strong id="identity-preview-range">—</strong>
-            crime rate reduction expected
+            <span id="identity-preview-text">crime index impact expected</span>
           </div>
           <span id="type-field-error" class="field-error-msg" role="alert" aria-live="polite">
-            Select a target type.
+            Select or verify a target profile.
           </span>
         </section>
 
@@ -213,8 +239,8 @@ function buildNotebookHTML() {
                 type="text"
                 id="time-of-death-input"
                 class="field-input"
-                placeholder="e.g. 23:41"
-                maxlength="10"
+                placeholder="40s default, or e.g. 23:41"
+                maxlength="15"
                 autocomplete="off"
                 aria-label="Time of death (optional)"
               >
@@ -227,7 +253,7 @@ function buildNotebookHTML() {
               <textarea
                 id="final-actions-input"
                 class="field-textarea"
-                placeholder="What were they doing when it happened…"
+                placeholder="Specific instructions before expiry (e.g., 'releases ledger files to press')…"
                 maxlength="${FINAL_ACTIONS_MAX}"
                 aria-label="Final actions before death (optional)"
               ></textarea>
@@ -238,16 +264,21 @@ function buildNotebookHTML() {
           </div>
         </section>
 
+        <!-- ── Lifespan Cost Warning ── -->
+        <div class="ledger-cost-notice" id="ledger-cost-notice">
+          ⚠️ <strong>Cost:</strong> Each entry permanently costs 3–14 days of lifespan. Consequences cascade across the world.
+        </div>
+
         <!-- ── Write Name Button ── -->
         <section class="write-name-section" aria-labelledby="write-section-label">
           <span id="write-section-label" class="write-name-hint" aria-live="polite">
-            Hold to confirm the entry
+            Hold for 2 seconds to seal the entry in ink
           </span>
           <button
             id="write-name-btn"
             class="write-name-btn disabled"
             type="button"
-            aria-label="Hold for 2 seconds to write name and confirm kill"
+            aria-label="Hold for 2 seconds to write name and confirm entry"
             disabled
           >
             <div class="write-name-btn__fill" id="write-btn-fill" aria-hidden="true"></div>
@@ -273,7 +304,7 @@ function buildNotebookHTML() {
     <div class="processing-dot"></div>
     <div class="processing-dot"></div>
     <div class="processing-dot"></div>
-    <span>World reacting…</span>
+    <span>Simulating world advancement…</span>
   </div>
 
   <!-- ── Error Toast ── -->
@@ -282,18 +313,13 @@ function buildNotebookHTML() {
 }
 
 // ---------------------------------------------------------------------------
-// DOM helpers
+// DOM Helpers & Validation
 // ---------------------------------------------------------------------------
 
 function el(id) {
   return document.getElementById(id);
 }
 
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
-
-/** Returns true if all required fields are valid */
 function isFormValid() {
   return (
     form.name.trim().length > 0 &&
@@ -302,34 +328,28 @@ function isFormValid() {
   );
 }
 
-/**
- * Runs validation, highlights errors, returns true if valid.
- */
 function validateAndHighlight() {
   let valid = true;
 
-  // Name
   const nameBlock = el('target-name-input')?.closest('.name-input-block');
   if (!form.name.trim()) {
-    nameBlock?.classList.add('field-block--error');  // shows the error msg via CSS
-    el('name-field-error')?.style && (el('name-field-error').style.opacity = '1');
+    nameBlock?.classList.add('field-block--error');
+    if (el('name-field-error')) el('name-field-error').style.opacity = '1';
     valid = false;
   } else {
     nameBlock?.classList.remove('field-block--error');
     if (el('name-field-error')) el('name-field-error').style.opacity = '0';
   }
 
-  // Type
   if (!form.targetType) {
-    el('type-field-error')?.style && (el('type-field-error').style.opacity = '1');
+    if (el('type-field-error')) el('type-field-error').style.opacity = '1';
     valid = false;
   } else {
     if (el('type-field-error')) el('type-field-error').style.opacity = '0';
   }
 
-  // Method
   if (!form.method) {
-    el('method-field-error')?.style && (el('method-field-error').style.opacity = '1');
+    if (el('method-field-error')) el('method-field-error').style.opacity = '1';
     valid = false;
   } else {
     if (el('method-field-error')) el('method-field-error').style.opacity = '0';
@@ -337,10 +357,6 @@ function validateAndHighlight() {
 
   return valid;
 }
-
-// ---------------------------------------------------------------------------
-// Button enablement
-// ---------------------------------------------------------------------------
 
 function updateWriteButton() {
   const btn = el('write-name-btn');
@@ -356,46 +372,109 @@ function updateWriteButton() {
 }
 
 // ---------------------------------------------------------------------------
-// Name input events
+// Binding Functions
 // ---------------------------------------------------------------------------
 
-function bindNameInput() {
-  const input = el('target-name-input');
-  const wrapper = el('name-input-wrapper');
+function bindTargetDossierSelect() {
+  const select = el('target-dossier-select');
+  if (!select) return;
 
-  input.addEventListener('input', () => {
-    form.name = input.value;
-    wrapper.classList.toggle('has-value', form.name.trim().length > 0);
+  select.addEventListener('change', () => {
+    const charId = select.value;
+    const gameState = getGameState();
+    const characters = gameState?.characters || CHARACTERS;
+
+    if (charId && characters[charId]) {
+      const char = characters[charId];
+      form.name = char.name;
+      form.targetId = charId;
+      form.targetType = char.targetType || 'syndicate_leader';
+
+      // Update name input field
+      const nameInput = el('target-name-input');
+      if (nameInput) {
+        nameInput.value = char.name;
+        el('name-input-wrapper')?.classList.add('has-value');
+      }
+
+      // Highlight corresponding type chip
+      document.querySelectorAll('.identity-chip').forEach(c => {
+        const matches = c.dataset.type === form.targetType;
+        c.classList.toggle('identity-chip--selected', matches);
+        c.setAttribute('aria-pressed', matches ? 'true' : 'false');
+      });
+
+      // Update preview
+      const preview = el('identity-preview');
+      const previewRange = el('identity-preview-range');
+      const previewText = el('identity-preview-text');
+      if (preview && previewRange && previewText) {
+        previewRange.textContent = `${char.name} (${char.role})`;
+        previewText.textContent = char.crimeImpact
+          ? `Faction: ${char.factionId || 'Independent'}`
+          : 'crime index impact expected';
+        preview.classList.add('visible');
+      }
+    } else {
+      form.targetId = null;
+    }
     updateWriteButton();
   });
 }
 
-// ---------------------------------------------------------------------------
-// Identity chips
-// ---------------------------------------------------------------------------
+function bindNameInput() {
+  const input = el('target-name-input');
+  const wrapper = el('name-input-wrapper');
+  if (!input) return;
+
+  input.addEventListener('input', () => {
+    form.name = input.value;
+    wrapper?.classList.toggle('has-value', form.name.trim().length > 0);
+
+    // Auto-match known character by name if exact or close match
+    const gameState = getGameState();
+    const characters = gameState?.characters || CHARACTERS;
+    const match = Object.entries(characters).find(
+      ([_, c]) => c.name.toLowerCase() === form.name.trim().toLowerCase()
+    );
+
+    if (match) {
+      form.targetId = match[0];
+      if (!form.targetType) {
+        form.targetType = match[1].targetType;
+        document.querySelectorAll('.identity-chip').forEach(c => {
+          c.classList.toggle('identity-chip--selected', c.dataset.type === form.targetType);
+        });
+      }
+    } else {
+      form.targetId = null;
+    }
+
+    updateWriteButton();
+  });
+}
 
 function bindIdentityChips() {
   const chips = document.querySelectorAll('.identity-chip');
   const preview = el('identity-preview');
   const previewRange = el('identity-preview-range');
+  const previewText = el('identity-preview-text');
 
   chips.forEach(chip => {
     chip.addEventListener('click', () => {
       const typeKey = chip.dataset.type;
       form.targetType = typeKey;
 
-      // Update aria-pressed
       chips.forEach(c => c.setAttribute('aria-pressed', 'false'));
       chip.setAttribute('aria-pressed', 'true');
 
-      // Update chip selected style — remove all, add to clicked
       chips.forEach(c => c.classList.remove('identity-chip--selected'));
       chip.classList.add('identity-chip--selected');
 
-      // Show preview
       const typeMeta = TARGET_TYPES.find(t => t.key === typeKey);
-      if (typeMeta && previewRange) {
+      if (typeMeta && previewRange && previewText) {
         previewRange.textContent = typeMeta.crimePreview;
+        previewText.textContent = 'crime index reduction expected';
         preview?.classList.add('visible');
       }
 
@@ -403,10 +482,6 @@ function bindIdentityChips() {
     });
   });
 }
-
-// ---------------------------------------------------------------------------
-// Cause of death options
-// ---------------------------------------------------------------------------
 
 function bindCauseOptions() {
   const options = document.querySelectorAll('.cause-option');
@@ -416,7 +491,6 @@ function bindCauseOptions() {
       const method = opt.dataset.method;
       form.method = method;
 
-      // Update all options
       options.forEach(o => {
         o.classList.remove('cause-option--selected');
         o.setAttribute('aria-pressed', 'false');
@@ -429,24 +503,17 @@ function bindCauseOptions() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Time input
-// ---------------------------------------------------------------------------
-
 function bindTimeInput() {
   const input = el('time-of-death-input');
-  input.addEventListener('input', () => {
+  input?.addEventListener('input', () => {
     form.time = input.value;
   });
 }
 
-// ---------------------------------------------------------------------------
-// Final actions textarea
-// ---------------------------------------------------------------------------
-
 function bindFinalActionsInput() {
   const textarea = el('final-actions-input');
   const counter = el('final-actions-count');
+  if (!textarea || !counter) return;
 
   textarea.addEventListener('input', () => {
     form.finalActions = textarea.value;
@@ -458,7 +525,6 @@ function bindFinalActionsInput() {
 
 // ---------------------------------------------------------------------------
 // Hold button mechanic — 2-second press to confirm
-// GDD 5.3: "WRITE NAME requires 2s hold to prevent accidents"
 // ---------------------------------------------------------------------------
 
 function bindWriteNameButton() {
@@ -466,6 +532,7 @@ function bindWriteNameButton() {
   const fill = el('write-btn-fill');
   const label = el('write-btn-label');
   const timerDisplay = el('hold-timer-display');
+  if (!btn) return;
 
   function startHold(e) {
     e.preventDefault();
@@ -481,10 +548,8 @@ function bindWriteNameButton() {
       const elapsed = Date.now() - _holdStart;
       const progress = Math.min(elapsed / HOLD_DURATION_MS, 1);
 
-      // Update fill
       if (fill) fill.style.width = `${progress * 100}%`;
 
-      // Update timer display
       const remaining = Math.max(0, HOLD_DURATION_MS - elapsed);
       if (timerDisplay) {
         timerDisplay.textContent = remaining > 50
@@ -495,7 +560,7 @@ function bindWriteNameButton() {
       if (progress >= 1) {
         releaseHold(true);
       }
-    }, 16); // ~60fps
+    }, 16);
   }
 
   function cancelHold() {
@@ -522,14 +587,12 @@ function bindWriteNameButton() {
     }
 
     if (completed) {
-      // Immediately disable to prevent double-fire
       btn.disabled = true;
       btn.classList.add('loading');
-      if (label) label.textContent = 'Processing';
+      if (label) label.textContent = 'Sealing In Ink…';
       if (fill) fill.style.width = '100%';
       onKillConfirmed();
     } else {
-      // Animate fill back to 0
       if (fill) {
         fill.style.transition = `width ${HOLD_DURATION_MS * 0.3}ms ease-out`;
         fill.style.width = '0%';
@@ -538,128 +601,117 @@ function bindWriteNameButton() {
     }
   }
 
-  // Mouse events
   btn.addEventListener('mousedown', startHold);
   btn.addEventListener('mouseup', () => cancelHold());
   btn.addEventListener('mouseleave', () => cancelHold());
-
-  // Touch events (mobile)
   btn.addEventListener('touchstart', startHold, { passive: false });
   btn.addEventListener('touchend', () => cancelHold());
   btn.addEventListener('touchcancel', () => cancelHold());
 }
 
 // ---------------------------------------------------------------------------
-// onKillConfirmed — core kill flow
+// onKillConfirmed — Central Action Execution
 // ---------------------------------------------------------------------------
 
 async function onKillConfirmed() {
   const btn = el('write-name-btn');
   const processing = el('notebook-processing');
 
-  // Build the kill object from form state
   const kill = {
     targetName: form.name.trim(),
-    targetType: form.targetType,
-    method: form.method,
+    targetId: form.targetId || null,
+    targetType: form.targetType || 'petty_criminal',
+    cause: form.method || 'cardiac',
     finalActions: form.finalActions.trim() || null,
     timeOfDeath: form.time.trim() || null,
   };
 
-  // Show processing toast
   processing?.classList.add('visible');
 
   try {
-    // Get live game state — fall back to a minimal stub if not initialized yet
-    const gameState = getGameState() || _createFallbackState();
-
-    // Build prompt with compound memory if available
-    const runHistory = getRunHistory();
-    const prompt = buildWorldReactionPrompt(gameState, kill, runHistory);
-
-    // Call Gemini
-    const reaction = await callGemini(prompt);
-
-    // Validate
-    const { valid, errors } = validateWorldReaction(reaction, gameState);
-    if (!valid) {
-      console.warn('[Notebook] Validation warnings:', errors);
-      // Continue — soft errors are already clamped inside validateWorldReaction
+    const gameState = getGameState();
+    if (!gameState) {
+      throw new Error('Game state not initialized.');
     }
 
-    // Apply deltas to game state
-    applyWorldReaction(gameState, reaction, kill, clamp);
+    // 1. Authoritative resolution through actionEngine
+    const rng = getRNG();
+    const actionResult = resolveAction(ACTION_TYPES.LEDGER_ENTRY, kill, gameState, rng);
 
-    // Recalculate agency statuses after suspicion deltas are applied
-    const agencyChanges = updateAllAgencyStatuses(gameState);
-    if (agencyChanges.anyEscalation) {
-      console.log('[Notebook] Agency escalations:', agencyChanges.changes);
+    if (!actionResult.success) {
+      throw new Error(actionResult.errors?.join(' ') || 'The Ledger rejected the entry.');
     }
 
-    // Persist
+    // 2. Identify primary event for narrative generation
+    const primaryEvent = actionResult.events.find(e => e.type === EVENT_TYPES.DEATH)
+      || actionResult.events.find(e => e.type === EVENT_TYPES.LEDGER_ENTRY)
+      || actionResult.events[0];
+
+    // 3. Narrative generation (Gemini provider if configured, otherwise deterministic fallback)
+    let narrative = null;
+    if (primaryEvent) {
+      try {
+        const narrativeContext = buildNarrativeContext(gameState, primaryEvent);
+        narrative = await requestNarrative('newsArticle', narrativeContext, {
+          provider: geminiProvider,
+          timeout: 8000,
+          rng,
+        });
+
+        if (narrative) {
+          const newsItem = {
+            headline: narrative.headline,
+            detail: narrative.detail,
+            source: narrative.source || 'Breaking Intelligence',
+            timestamp: 'just now',
+            watcherLine: narrative.watcherLine,
+            agencyPublicMove: narrative.agencyPublicMove,
+            turn: gameState.turn,
+          };
+          if (!gameState.newsFeed) gameState.newsFeed = [];
+          gameState.newsFeed.unshift(newsItem);
+          if (gameState.newsFeed.length > 25) gameState.newsFeed.pop();
+        }
+      } catch (narErr) {
+        console.warn('[Notebook] Narrative generation skipped/failed:', narErr.message);
+      }
+    }
+
+    // 4. Update agency statuses
+    updateAllAgencyStatuses(gameState);
+
+    // 5. Persist authoritative game state
     saveGame();
+    window.gameState = gameState;
 
-    // FIX 7: Sync window.gameState reference so dashboard re-render reads fresh data
-    window.gameState = getGameState();
+    // 6. Notify the application
+    window.dispatchEvent(new CustomEvent('null:kill-complete', {
+      detail: { actionResult, narrative, timestamp: Date.now() }
+    }));
 
-    // FIX 7: Notify dashboard to re-render before ink animation starts
-    window.dispatchEvent(new CustomEvent('null:kill-complete'));
-
-    // Play ink animation then redirect
+    // 7. Play Ink Animation with the Watcher's observation line
     processing?.classList.remove('visible');
-    await playInkAnimation(kill.targetName, reaction.voidLine || '');
+    const voidLine = narrative?.watcherLine || 'The name is written. A thread snaps in the dark.';
+    await playInkAnimation(kill.targetName, voidLine);
 
   } catch (err) {
     console.error('[Notebook] Kill flow error:', err);
     processing?.classList.remove('visible');
-    showError(`World engine unreachable. ${err.message?.slice(0, 80) || 'Unknown error.'}`);
+    showError(err.message?.slice(0, 100) || 'Supernatural rule violation.');
 
-    // Reset button so player can retry
     if (btn) {
       btn.disabled = false;
       btn.classList.remove('loading', 'disabled');
-      btn.classList.remove('disabled'); // redundant safety
-      btn.querySelector('.write-name-btn__label').textContent = 'WRITE NAME';
+      const label = btn.querySelector('.write-name-btn__label');
+      if (label) label.textContent = 'WRITE NAME';
       const fill = el('write-btn-fill');
       if (fill) fill.style.width = '0%';
     }
   }
 }
 
-/**
- * Creates a minimal fallback game state if initGame hasn't been called.
- * Prevents the notebook from crashing when loaded standalone.
- */
-function _createFallbackState() {
-  return {
-    version: '1.0',
-    region: 'india',
-    playerName: 'Unknown',
-    currentAct: 1,
-    currentBeat: 1,
-    runNumber: 1,
-    crimeRate: 80,
-    publicFearIndex: 10,
-    egoIndex: 0,
-    exposureRisk: 0,
-    lifespanDays: 9847,
-    agencySuspicion: { CBI: 0, RAW: 0, IB: 0 },
-    agencyStatus: { CBI: 'UNAWARE', RAW: 'UNAWARE', IB: 'UNAWARE' },
-    agencyDarkMode: false,
-    eyesDealActive: false,
-    totalKills: 0,
-    killMethods: { heartAttack: 0, accident: 0, publicDeath: 0, manipulated: 0 },
-    companionAlliance: null,
-    phantomBroadcastTriggered: false,
-    newsFeed: [],
-    killLog: [],
-    compoundMemoryEnabled: false,
-    lastSavedAt: null,
-  };
-}
-
 // ---------------------------------------------------------------------------
-// Ink spread animation — plays after kill confirmed, before redirect
+// Ink spread animation & Navigation
 // ---------------------------------------------------------------------------
 
 function playInkAnimation(targetName, voidLine) {
@@ -669,21 +721,17 @@ function playInkAnimation(targetName, voidLine) {
     const voidEl = el('ink-void-line');
 
     if (!overlay) {
-      // No overlay? Just redirect immediately
       setTimeout(redirectToDashboard, 300);
       resolve();
       return;
     }
 
-    // Set content
     if (nameFlash) nameFlash.textContent = targetName;
     if (voidEl) voidEl.textContent = voidLine;
 
-    // Activate — triggers CSS animations
     overlay.setAttribute('aria-hidden', 'false');
     overlay.classList.add('active');
 
-    // After animation completes (~2s), redirect
     setTimeout(() => {
       resolve();
       redirectToDashboard();
@@ -691,18 +739,12 @@ function playInkAnimation(targetName, voidLine) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Navigation
-// ---------------------------------------------------------------------------
-
 function redirectToDashboard() {
-  // If using a single-page layout, hide notebook and show dashboard
   const notebookScreen = el('notebook-screen');
   const dashboardScreen = el('dashboard-screen');
   const inkOverlay = el('ink-overlay');
 
   if (dashboardScreen && notebookScreen) {
-    // Fade out ink overlay
     if (inkOverlay) {
       inkOverlay.style.opacity = '0';
       inkOverlay.style.transition = 'opacity 0.4s ease-out';
@@ -713,18 +755,16 @@ function redirectToDashboard() {
       }, 400);
     }
 
-    // Screen swap
     setTimeout(() => {
       notebookScreen.classList.add('hidden');
       dashboardScreen.classList.remove('hidden');
 
-      // Trigger dashboard re-render with updated game state
-      window.dispatchEvent(new CustomEvent('null:kill-complete', {
-        detail: { timestamp: Date.now() }
-      }));
+      // Refresh dashboard
+      if (typeof window.initDashboard === 'function') {
+        window.initDashboard();
+      }
     }, 400);
   } else {
-    // Fallback: hard redirect
     window.location.hash = '#dashboard';
     window.location.reload();
   }
@@ -733,57 +773,68 @@ function redirectToDashboard() {
 function showNotebook() {
   const notebookScreen = el('notebook-screen');
   const dashboardScreen = el('dashboard-screen');
+  const intelScreen = el('intel-screen');
+  const companionScreen = el('companion-screen');
+  const voidScreen = el('void-screen');
+
+  [dashboardScreen, intelScreen, companionScreen, voidScreen].forEach(s => s?.classList.add('hidden'));
 
   if (notebookScreen) {
     notebookScreen.classList.remove('hidden');
     notebookScreen.style.animation = 'none';
-    // Force reflow, then re-apply
     void notebookScreen.offsetWidth;
     notebookScreen.style.animation = '';
   }
-  if (dashboardScreen) {
-    dashboardScreen.classList.add('hidden');
-  }
 
-  // Reset form for fresh entry
   resetForm();
+  updateKillCount();
+  refreshTargetSelect();
 }
 
-// ---------------------------------------------------------------------------
-// Form reset
-// ---------------------------------------------------------------------------
+function refreshTargetSelect() {
+  const select = el('target-dossier-select');
+  if (!select) return;
+  const gameState = getGameState();
+  const characters = gameState?.characters || CHARACTERS;
+  const aliveCharacters = Object.entries(characters).filter(([_, c]) => c.isAlive !== false);
+
+  select.innerHTML = `
+    <option value="">— Select a dossier target (optional) —</option>
+    ${aliveCharacters.map(([id, c]) => `
+      <option value="${id}">${escapeHTML(c.name)} (${escapeHTML(c.role)})</option>
+    `).join('')}
+  `;
+}
 
 function resetForm() {
-  // Clear form state
   form.name = '';
+  form.targetId = null;
   form.targetType = null;
   form.method = null;
   form.time = '';
   form.finalActions = '';
 
-  // Reset DOM
   const nameInput = el('target-name-input');
   if (nameInput) nameInput.value = '';
 
   const wrapper = el('name-input-wrapper');
   wrapper?.classList.remove('has-value');
 
-  // Deselect all chips
+  const select = el('target-dossier-select');
+  if (select) select.value = '';
+
   document.querySelectorAll('.identity-chip').forEach(c => {
     c.classList.remove('identity-chip--selected');
     c.setAttribute('aria-pressed', 'false');
   });
 
-  // Hide preview
   el('identity-preview')?.classList.remove('visible');
 
-  // Deselect all cause options
   document.querySelectorAll('.cause-option').forEach(o => {
     o.classList.remove('cause-option--selected');
     o.setAttribute('aria-pressed', 'false');
   });
 
-  // Reset time & final actions
   const timeInput = el('time-of-death-input');
   if (timeInput) timeInput.value = '';
 
@@ -793,7 +844,6 @@ function resetForm() {
   const charCount = el('final-actions-count');
   if (charCount) charCount.textContent = `0 / ${FINAL_ACTIONS_MAX}`;
 
-  // Reset button
   const btn = el('write-name-btn');
   if (btn) {
     btn.disabled = true;
@@ -809,27 +859,26 @@ function resetForm() {
     fill.style.width = '0%';
   }
 
-  // Clear error states
   [el('name-field-error'), el('type-field-error'), el('method-field-error')].forEach(e => {
     if (e) e.style.opacity = '0';
   });
 
-  // Update kill count from game state
   updateKillCount();
 }
 
 function updateKillCount() {
   const gameState = getGameState();
   const countEl = el('notebook-kill-count');
+  const lifespanEl = el('notebook-lifespan');
+
   if (countEl && gameState) {
-    const n = gameState.totalKills || 0;
+    const n = gameState.totalLedgerEntries || gameState.totalKills || 0;
     countEl.textContent = `${n} ${n === 1 ? 'entry' : 'entries'}`;
   }
+  if (lifespanEl && gameState) {
+    lifespanEl.textContent = `⏳ ${gameState.lifespanDays || 0}d`;
+  }
 }
-
-// ---------------------------------------------------------------------------
-// Error toast
-// ---------------------------------------------------------------------------
 
 function showError(message) {
   const toast = el('notebook-error-toast');
@@ -839,15 +888,9 @@ function showError(message) {
   setTimeout(() => toast.classList.remove('visible'), 5000);
 }
 
-// ---------------------------------------------------------------------------
-// Back button
-// ---------------------------------------------------------------------------
-
 function bindBackButton() {
   const backBtn = el('notebook-back-btn');
-  backBtn?.addEventListener('click', () => {
-    redirectToDashboard();
-  });
+  backBtn?.addEventListener('click', redirectToDashboard);
 }
 
 // ---------------------------------------------------------------------------
@@ -855,14 +898,12 @@ function bindBackButton() {
 // ---------------------------------------------------------------------------
 
 function injectNotebookHTML() {
-  // Check if already injected
   if (el('notebook-screen')) return;
 
   const container = document.createElement('div');
   container.innerHTML = buildNotebookHTML();
-  // Append the main screen element
   document.body.appendChild(container.querySelector('#notebook-screen'));
-  // Append the overlays if not already present
+
   if (!el('ink-overlay')) {
     document.body.appendChild(container.querySelector('#ink-overlay'));
   }
@@ -877,7 +918,7 @@ function injectNotebookHTML() {
 function initNotebook() {
   injectNotebookHTML();
 
-  // Bind all interactive elements
+  bindTargetDossierSelect();
   bindNameInput();
   bindIdentityChips();
   bindCauseOptions();
@@ -886,41 +927,20 @@ function initNotebook() {
   bindWriteNameButton();
   bindBackButton();
 
-  // Wire dashboard "Open Notebook" nav button
   const navNotebookBtn = el('nav-notebook');
   navNotebookBtn?.addEventListener('click', showNotebook);
 
-  // Listen for kill-complete events to re-render dashboard
   window.addEventListener('null:kill-complete', () => {
-    // Give dashboard a chance to re-render with fresh game state
-    if (typeof window.renderStatCards === 'function') {
-      const gs = getGameState();
-      if (gs) {
-        window.renderStatCards(gs);
-        window.renderAgencies?.(gs);
-        // Prepend latest news item if available
-        if (gs.newsFeed?.length > 0 && typeof window.prependNewsItem === 'function') {
-          window.prependNewsItem(gs.newsFeed[0]);
-        }
-      }
-    }
+    updateKillCount();
   });
 
   updateKillCount();
 }
-
-// ---------------------------------------------------------------------------
-// Auto-initialize on DOM ready
-// ---------------------------------------------------------------------------
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initNotebook);
 } else {
   initNotebook();
 }
-
-// ---------------------------------------------------------------------------
-// Exports
-// ---------------------------------------------------------------------------
 
 export { initNotebook, showNotebook, redirectToDashboard };
